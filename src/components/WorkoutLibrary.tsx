@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Search, Filter, Clock, Target, Dumbbell, Star, Play, Plus, Minus, Calendar, Settings } from 'lucide-react';
-import { workoutLibrary, ExerciseDetail, WorkoutCategory } from '../data/workoutLibrary';
+import React, { useEffect, useState } from 'react';
+import { Search, Dumbbell, Star, Play, Plus, Minus, Calendar } from 'lucide-react';
+import { workoutLibrary, ExerciseDetail, getAllExercises } from '../data/workoutLibrary';
 import { Exercise } from '../types';
 
 interface ScheduledExercise extends Exercise {
@@ -18,33 +18,48 @@ interface WorkoutLibraryProps {
   onUpdateSchedule?: (exerciseId: string, updates: any) => void;
 }
 
+const FAVORITE_WORKOUTS_STORAGE_KEY = 'fitai_favorite_workouts';
+
 const WorkoutLibrary: React.FC<WorkoutLibraryProps> = ({ 
   onStartExercise, 
   onAddToSchedule, 
   onRemoveFromSchedule,
   scheduledExercises = [],
-  isExerciseScheduled,
-  onUpdateSchedule
+  isExerciseScheduled
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState<string>('all');
-  const [editingExercise, setEditingExercise] = useState<string | null>(null);
+  const [favoriteWorkoutIds, setFavoriteWorkoutIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(FAVORITE_WORKOUTS_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Error loading favorite workouts:', error);
+      return [];
+    }
+  });
 
-  
-  // Add "My Workouts" category if user has scheduled exercises
-  const allCategories = scheduledExercises.length > 0 
-    ? [
-        {
-          id: 'my-workouts',
-          name: 'My Workouts',
-          icon: '⭐',
-          description: 'Your scheduled exercises',
-          exercises: []
-        },
-        ...workoutLibrary
-      ]
-    : workoutLibrary;
+  useEffect(() => {
+    try {
+      localStorage.setItem(FAVORITE_WORKOUTS_STORAGE_KEY, JSON.stringify(favoriteWorkoutIds));
+    } catch (error) {
+      console.error('Error saving favorite workouts:', error);
+    }
+  }, [favoriteWorkoutIds]);
+
+  const favoriteWorkouts = getAllExercises().filter(exercise => favoriteWorkoutIds.includes(exercise.id));
+
+  const allCategories = [
+    {
+      id: 'my-workouts',
+      name: 'My Workouts',
+      icon: '*',
+      description: 'Your favorite workouts',
+      exercises: favoriteWorkouts
+    },
+    ...workoutLibrary
+  ];
 
   const filteredCategories = allCategories.filter(category => {
     if (selectedCategory !== 'all' && category.id !== selectedCategory) return false;
@@ -56,6 +71,7 @@ const WorkoutLibrary: React.FC<WorkoutLibraryProps> = ({
       return matchesSearch && matchesDifficulty;
     });
     
+    if (category.id === 'my-workouts' && selectedCategory === 'my-workouts') return true;
     return categoryExercises.length > 0;
   }).map(category => ({
     ...category,
@@ -76,14 +92,6 @@ const WorkoutLibrary: React.FC<WorkoutLibraryProps> = ({
     }
   };
 
-  const getDayName = (day: string) => {
-    const days = {
-      monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu',
-      friday: 'Fri', saturday: 'Sat', sunday: 'Sun'
-    };
-    return days[day as keyof typeof days] || day;
-  };
-
   const handleAddToSchedule = (exercise: ExerciseDetail) => {
     if (onAddToSchedule) {
       const exerciseToAdd: Exercise = {
@@ -95,7 +103,8 @@ const WorkoutLibrary: React.FC<WorkoutLibraryProps> = ({
         duration: exercise.duration,
         restTime: exercise.restTime,
         targetMuscles: exercise.targetMuscles,
-        instructions: exercise.instructions
+        instructions: exercise.instructions,
+        image: exercise.image
       };
       onAddToSchedule(exerciseToAdd);
     }
@@ -107,11 +116,131 @@ const WorkoutLibrary: React.FC<WorkoutLibraryProps> = ({
     }
   };
 
-  const handleUpdateSchedule = (exerciseId: string, updates: any) => {
-    if (onUpdateSchedule) {
-      onUpdateSchedule(exerciseId, updates);
-      setEditingExercise(null);
-    }
+  const toggleFavoriteWorkout = (exerciseId: string) => {
+    setFavoriteWorkoutIds(prev => (
+      prev.includes(exerciseId)
+        ? prev.filter(id => id !== exerciseId)
+        : [...prev, exerciseId]
+    ));
+  };
+
+  const renderExerciseCard = (exercise: ExerciseDetail) => {
+    const isScheduled = isExerciseScheduled ? isExerciseScheduled(exercise.id) : false;
+    const isFavorite = favoriteWorkoutIds.includes(exercise.id);
+
+    return (
+      <div
+        key={exercise.id}
+        className={`border-2 rounded-xl p-4 transition-all duration-300 hover:shadow-blue-glow ${
+          isScheduled
+            ? 'border-navy-500 bg-gradient-to-br from-navy-100 to-navy-200 shadow-blue-glow'
+            : 'border-navy-200 hover:border-navy-300 bg-gradient-to-br from-white to-navy-50'
+        }`}
+      >
+        <div className="mb-3 relative">
+          {exercise.image ? (
+            <img
+              src={exercise.image}
+              alt={exercise.name}
+              className="w-full aspect-square object-cover rounded-lg shadow-sm"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+          ) : (
+            <div className="w-full aspect-square bg-gradient-to-br from-navy-100 via-navy-200 to-navy-300 rounded-lg shadow-sm flex items-center justify-center">
+              <div className="text-center">
+                <Dumbbell className="w-12 h-12 text-navy-400 mx-auto mb-2" />
+                <p className="text-navy-600 text-sm font-medium">Exercise</p>
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFavoriteWorkout(exercise.id);
+            }}
+            aria-label={isFavorite ? `Remove ${exercise.name} from My Workouts` : `Save ${exercise.name} to My Workouts`}
+            title={isFavorite ? 'Remove from My Workouts' : 'Save to My Workouts'}
+            className={`absolute top-2 right-2 p-2 rounded-full shadow-lg transition-all duration-300 ${
+              isFavorite
+                ? 'bg-blue-shine text-white shadow-blue-glow'
+                : 'bg-white/95 text-navy-500 hover:text-yellow-500 hover:shadow-blue-glow'
+            }`}
+          >
+            <Star className="w-4 h-4" fill={isFavorite ? 'currentColor' : 'none'} />
+          </button>
+
+          {isScheduled && (
+            <div className="absolute top-2 left-2 bg-blue-shine text-white p-1.5 rounded-full shadow-lg">
+              <Calendar className="w-3 h-3" />
+            </div>
+          )}
+          <div className="absolute bottom-2 right-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-semibold shadow-lg ${getDifficultyColor(exercise.difficulty)}`}>
+              {exercise.difficulty}
+            </span>
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <h3 className="text-lg font-semibold text-navy-800 leading-tight">{exercise.name}</h3>
+        </div>
+
+        <div className="mb-4">
+          <div className="flex flex-wrap gap-1">
+            {exercise.targetMuscles.map((muscle, index) => (
+              <span
+                key={index}
+                className="px-2 py-1 bg-blue-shine text-white rounded-full text-xs font-medium"
+              >
+                {muscle}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2">
+          {onStartExercise && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onStartExercise(exercise);
+              }}
+              className="w-full bg-gradient-to-r from-navy-100 to-navy-200 text-navy-700 py-2 rounded-lg font-medium hover:shadow-lg transition-all duration-300 flex items-center justify-center text-sm"
+            >
+              <Play className="w-4 h-4 mr-2" />
+              Start Workout
+            </button>
+          )}
+          {isScheduled ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRemoveFromSchedule(exercise.id);
+              }}
+              className="w-full bg-gradient-to-r from-red-100 to-red-200 text-red-700 py-2 rounded-lg font-medium hover:shadow-lg transition-all duration-300 flex items-center justify-center text-sm"
+            >
+              <Minus className="w-4 h-4 mr-2" />
+              Remove from Schedule
+            </button>
+          ) : (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddToSchedule(exercise);
+              }}
+              className="w-full bg-blue-shine text-white py-2 rounded-lg font-medium hover:shadow-blue-glow transition-all duration-300 flex items-center justify-center text-sm"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add to Schedule
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -144,7 +273,7 @@ const WorkoutLibrary: React.FC<WorkoutLibraryProps> = ({
             className="px-4 py-3 rounded-xl border border-navy-200 focus:ring-2 focus:ring-navy-500 focus:border-transparent transition-all shadow-lg"
           >
             <option value="all">All Categories</option>
-            {workoutLibrary.map(category => (
+            {allCategories.map(category => (
               <option key={category.id} value={category.id}>
                 {category.name}
               </option>
@@ -214,247 +343,17 @@ const WorkoutLibrary: React.FC<WorkoutLibraryProps> = ({
               </div>
             </div>
 
-            {category.id === 'my-workouts' ? (
-              // Special rendering for My Workouts category
-              scheduledExercises.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="bg-gradient-to-br from-navy-100 to-navy-200 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Star className="w-10 h-10 text-navy-400" />
-                  </div>
-                  <h3 className="text-xl font-semibold text-navy-800 mb-2">No Scheduled Exercises</h3>
-                  <p className="text-navy-600">Add exercises from other categories to build your routine</p>
+            {category.id === 'my-workouts' && category.exercises.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="bg-gradient-to-br from-navy-100 to-navy-200 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Star className="w-10 h-10 text-navy-400" />
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {scheduledExercises.map(exercise => {
-                    const isEditing = editingExercise === exercise.id;
-                    
-                    return (
-                      <div
-                        key={exercise.id}
-                        className="border-2 border-navy-500 bg-gradient-to-br from-navy-100 to-navy-200 rounded-xl p-6 shadow-blue-glow"
-                      >
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-navy-800 mb-2">{exercise.name}</h3>
-                            
-                            {/* Target Muscles */}
-                            <div className="mb-3">
-                              <div className="flex flex-wrap gap-1">
-                                {exercise.targetMuscles.map((muscle, index) => (
-                                  <span
-                                    key={index}
-                                    className="px-2 py-1 bg-blue-shine text-white rounded-full text-xs font-medium"
-                                  >
-                                    {muscle}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                            
-                            {/* Schedule Info */}
-                            <div className="grid grid-cols-2 gap-4 mb-4">
-                              <div className="bg-gradient-to-r from-navy-200 to-navy-300 p-3 rounded-lg">
-                                <div className="flex items-center mb-1">
-                                  <Calendar className="w-4 h-4 text-navy-600 mr-1" />
-                                  <span className="text-sm font-medium text-navy-600">Schedule</span>
-                                </div>
-                                <div className="text-sm text-navy-700">
-                                  {exercise.timesPerWeek}x/week on {exercise.scheduledDays.map(getDayName).join(', ')}
-                                </div>
-                              </div>
-                              
-                              <div className="bg-gradient-to-r from-navy-200 to-navy-300 p-3 rounded-lg">
-                                <div className="flex items-center mb-1">
-                                  <Target className="w-4 h-4 text-navy-600 mr-1" />
-                                  <span className="text-sm font-medium text-navy-600">Volume</span>
-                                </div>
-                                <div className="text-sm text-navy-700">
-                                  {exercise.sets} sets × {exercise.reps} reps
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="flex space-x-2 ml-4">
-                            <button
-                              onClick={() => setEditingExercise(isEditing ? null : exercise.id)}
-                              className="flex items-center px-3 py-2 bg-gradient-to-r from-navy-100 to-navy-200 text-navy-700 rounded-lg hover:shadow-lg transition-all duration-300"
-                            >
-                              <Settings className="w-4 h-4 mr-1" />
-                              {isEditing ? 'Cancel' : 'Edit'}
-                            </button>
-                            <button
-                              onClick={() => handleRemoveFromSchedule(exercise.id)}
-                              className="flex items-center px-3 py-2 bg-gradient-to-r from-red-100 to-red-200 text-red-700 rounded-lg hover:shadow-lg transition-all duration-300"
-                            >
-                              <Minus className="w-4 h-4 mr-1" />
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                        
-                        {/* Edit Form */}
-                        {isEditing && (
-                          <div className="border-t border-navy-300 pt-4 mt-4">
-                            <h4 className="font-semibold text-navy-800 mb-3">Customize Schedule</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-navy-700 mb-2">Sets</label>
-                                <input
-                                  type="number"
-                                  defaultValue={exercise.sets}
-                                  className="w-full px-3 py-2 border border-navy-300 rounded-lg focus:ring-2 focus:ring-navy-500"
-                                  onChange={(e) => {
-                                    const newSets = parseInt(e.target.value);
-                                    handleUpdateSchedule(exercise.id, { sets: newSets });
-                                  }}
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-navy-700 mb-2">Reps</label>
-                                <input
-                                  type="number"
-                                  defaultValue={exercise.reps}
-                                  className="w-full px-3 py-2 border border-navy-300 rounded-lg focus:ring-2 focus:ring-navy-500"
-                                  onChange={(e) => {
-                                    const newReps = parseInt(e.target.value);
-                                    handleUpdateSchedule(exercise.id, { reps: newReps });
-                                  }}
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-navy-700 mb-2">Times per Week</label>
-                                <select
-                                  defaultValue={exercise.timesPerWeek}
-                                  className="w-full px-3 py-2 border border-navy-300 rounded-lg focus:ring-2 focus:ring-navy-500"
-                                  onChange={(e) => {
-                                    const newFreq = parseInt(e.target.value);
-                                    // Auto-adjust days based on frequency
-                                    let newDays = [];
-                                    if (newFreq === 1) newDays = ['monday'];
-                                    else if (newFreq === 2) newDays = ['monday', 'thursday'];
-                                    else if (newFreq === 3) newDays = ['monday', 'wednesday', 'friday'];
-                                    else if (newFreq === 4) newDays = ['monday', 'tuesday', 'thursday', 'friday'];
-                                    else newDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
-                                    
-                                    handleUpdateSchedule(exercise.id, { 
-                                      timesPerWeek: newFreq,
-                                      scheduledDays: newDays
-                                    });
-                                  }}
-                                >
-                                  <option value={1}>1x per week</option>
-                                  <option value={2}>2x per week</option>
-                                  <option value={3}>3x per week</option>
-                                  <option value={4}>4x per week</option>
-                                  <option value={5}>5x per week</option>
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )
+                <h3 className="text-xl font-semibold text-navy-800 mb-2">No Favorite Workouts</h3>
+                <p className="text-navy-600">Click the star on any workout to save it here</p>
+              </div>
             ) : (
-              // Regular exercise library rendering
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {category.exercises.map(exercise => {
-                  const isScheduled = isExerciseScheduled ? isExerciseScheduled(exercise.id) : false;
-                  
-                  return (
-                    <div
-                      key={exercise.id}
-                      className={`border-2 rounded-xl p-4 transition-all duration-300 hover:shadow-blue-glow ${
-                        isScheduled
-                          ? 'border-navy-500 bg-gradient-to-br from-navy-100 to-navy-200 shadow-blue-glow'
-                          : 'border-navy-200 hover:border-navy-300 bg-gradient-to-br from-white to-navy-50'
-                      }`}
-                    >
-                      {/* Exercise Image */}
-                      <div className="mb-3 relative">
-                        {exercise.image ? (
-                          <img 
-                            src={exercise.image} 
-                            alt={exercise.name}
-                            className="w-full aspect-square object-cover rounded-lg shadow-sm"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <div className="w-full aspect-square bg-gradient-to-br from-navy-100 via-navy-200 to-navy-300 rounded-lg shadow-sm flex items-center justify-center">
-                            <div className="text-center">
-                              <Dumbbell className="w-12 h-12 text-navy-400 mx-auto mb-2" />
-                              <p className="text-navy-600 text-sm font-medium">Exercise</p>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {isScheduled && (
-                          <div className="absolute top-2 right-2 bg-blue-shine text-white p-1.5 rounded-full shadow-lg">
-                            <Star className="w-3 h-3" />
-                          </div>
-                        )}
-                        <div className="absolute bottom-2 right-2">
-                          <span className={`px-2 py-1 rounded-full text-xs font-semibold shadow-lg ${getDifficultyColor(exercise.difficulty)}`}>
-                            {exercise.difficulty}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Exercise Name */}
-                      <div className="mb-3">
-                        <h3 className="text-lg font-semibold text-navy-800 leading-tight">{exercise.name}</h3>
-                      </div>
-
-                    {/* Target Muscles */}
-                      {/* Target Muscles */}
-                      <div className="mb-4">
-                        <div className="flex flex-wrap gap-1">
-                          {exercise.targetMuscles.map((muscle, index) => (
-                            <span
-                              key={index}
-                              className="px-2 py-1 bg-blue-shine text-white rounded-full text-xs font-medium"
-                            >
-                              {muscle}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Action Button */}
-                      <div>
-                        {isScheduled ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemoveFromSchedule(exercise.id);
-                            }}
-                            className="w-full bg-gradient-to-r from-red-100 to-red-200 text-red-700 py-2 rounded-lg font-medium hover:shadow-lg transition-all duration-300 flex items-center justify-center text-sm"
-                          >
-                            <Minus className="w-4 h-4 mr-2" />
-                            Remove from Schedule
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAddToSchedule(exercise);
-                            }}
-                            className="w-full bg-blue-shine text-white py-2 rounded-lg font-medium hover:shadow-blue-glow transition-all duration-300 flex items-center justify-center text-sm"
-                          >
-                            <Plus className="w-4 h-4 mr-2" />
-                            Add to Schedule
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {category.exercises.map(renderExerciseCard)}
               </div>
             )}
           </div>
